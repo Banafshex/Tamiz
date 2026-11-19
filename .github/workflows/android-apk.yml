@@ -113,7 +113,7 @@ jobs:
           tail -n 100 gradle-build.log >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           {
-            grep -E '(^e:|error:|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find)' gradle-build.log | tail -n 40 || true
+            grep -E '(^e:|error:|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find|Searched in|Could not GET|Resource missing|No cached version)' gradle-build.log | tail -n 60 || true
             tail -n 12 gradle-build.log
           } | while IFS= read -r line; do
             escaped="${line//'%'/'%25'}"

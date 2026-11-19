@@ -146,6 +146,19 @@ jobs:
             echo "::error title=Gradle build failure::$escaped"
           done
 
+      - name: Upload Gradle diagnostics
+        if: failure() && hashFiles('gradle-build.log') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-diagnostics
+          path: |
+            gradle-build.log
+            app/build/outputs/logs/**
+            app/build/intermediates/merged_manifest/**
+            app/build/outputs/apk/**
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Collect universal APK
         id: apk
         shell: bash

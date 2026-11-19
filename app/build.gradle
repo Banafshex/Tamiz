@@ -17,7 +17,6 @@ android {
 
     defaultConfig {
         applicationId "com.mlmvpn.scanner"
-        manifestPlaceholders = [applicationId: "com.mlmvpn.scanner"]
         minSdk 24
         targetSdk 34
         versionCode 81
@@ -96,7 +95,6 @@ android {
 
     buildTypes {
         release {
-            manifestPlaceholders = [applicationId: "com.mlmvpn.scanner"]
             // R8: shrink unused library code (keeps all app code + native core).
             // shrinkResources left off — res is tiny and dynamic lookups exist.
             minifyEnabled true

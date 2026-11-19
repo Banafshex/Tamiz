@@ -312,7 +312,7 @@
 
         <provider android:process=":chat"
             android:name="org.mlmvpn.chat.bridge.ChatFileProvider"
-            android:authorities="${applicationId}.provider"
+            android:authorities="com.mlmvpn.scanner.provider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
@@ -321,7 +321,7 @@
         </provider>
 
         <provider android:process=":chat"
-            android:authorities="${applicationId}.notification_image_provider"
+            android:authorities="com.mlmvpn.scanner.notification_image_provider"
             android:name=".NotificationImageProvider"
             android:exported="false"
             android:grantUriPermissions="true"/>

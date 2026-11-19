@@ -136,8 +136,12 @@ jobs:
               echo "::error title=Manifest merger detail::$escaped"
             done < <(grep -iE 'error|merging errors|uses-sdk:|attribute [^ ]+.*(is|has)|is also present|already defined|conflict|manifest merger failed' "$report" | head -n 40 || true)
           done < <(find app/build -type f -iname '*manifest*report*' -print 2>/dev/null)
-          failure_lines="$(grep -iE 'what went wrong|execution failed|exception|error:|\berror\b|failed|failure|caused by|manifest merger|requires|duplicate|conflict|could not|unable|not found|cannot|unresolved reference|compilation error' gradle-build.log | head -n 35 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'NR > 1 { printf "%%0A" } { printf "%s", $0 }')"
-          echo "::error title=Gradle failure details::$failure_lines"
+          while IFS= read -r line; do
+            escaped="${line//'%'/'%25'}"
+            escaped="${escaped//$'\r'/'%0D'}"
+            escaped="${escaped//$'\n'/'%0A'}"
+            echo "::error title=Gradle failure detail::$escaped"
+          done < <(grep -iE 'what went wrong|execution failed|exception|error:|failed|failure|caused by|manifest merger|requires|duplicate|conflict|could not|unable|not found|cannot|unresolved reference|compilation error' gradle-build.log | head -n 25 || true)
 
       - name: Upload Gradle diagnostics
         if: failure() && hashFiles('gradle-build.log') != ''

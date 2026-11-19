@@ -56,7 +56,7 @@ jobs:
           "$sdkmanager" "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       # gradle.properties in this Windows-oriented checkout pins org.gradle.java.home to an
       # Android Studio path that does not exist on GitHub's Linux runner. Use setup-java's JDK.
@@ -80,12 +80,15 @@ jobs:
           echo '```text' >> "$GITHUB_STEP_SUMMARY"
           tail -n 100 gradle-build.log >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          while IFS= read -r line; do
+          {
+            grep -E '(^e:|error:|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find)' gradle-build.log | tail -n 40 || true
+            tail -n 12 gradle-build.log
+          } | while IFS= read -r line; do
             escaped="${line//'%'/'%25'}"
             escaped="${escaped//$'\r'/'%0D'}"
             escaped="${escaped//$'\n'/'%0A'}"
             echo "::error title=Gradle build failure::$escaped"
-          done < <(tail -n 35 gradle-build.log)
+          done
 
       - name: Collect universal APK
         id: apk

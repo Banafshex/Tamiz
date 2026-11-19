@@ -96,6 +96,7 @@ android {
 
     buildTypes {
         release {
+            manifestPlaceholders = [applicationId: "com.mlmvpn.scanner"]
             // R8: shrink unused library code (keeps all app code + native core).
             // shrinkResources left off — res is tiny and dynamic lookups exist.
             minifyEnabled true

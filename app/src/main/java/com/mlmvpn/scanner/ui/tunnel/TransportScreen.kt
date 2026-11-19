@@ -103,6 +103,7 @@ import com.mlmvpn.scanner.ui.settings.SettingsRow
 import com.mlmvpn.scanner.ui.settings.SettingsSectionHeader
 import com.mlmvpn.scanner.ui.theme.CardShape
 import com.mlmvpn.scanner.ui.theme.PanelShape
+import com.mlmvpn.scanner.store.tr
 import com.mlmvpn.scanner.R
 import com.mlmvpn.scanner.utils.S
 

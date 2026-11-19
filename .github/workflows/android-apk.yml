@@ -134,7 +134,7 @@ jobs:
               escaped="${escaped//$'\r'/'%0D'}"
               escaped="${escaped//$'\n'/'%0A'}"
               echo "::error title=Manifest merger detail::$escaped"
-            done < <(grep -E 'error:|Error:|Manifest merger failed|uses-sdk|attribute ' "$report" | tail -n 30 || true)
+            done < <(grep -iE 'error|merging errors|uses-sdk:|attribute [^ ]+.*(is|has)|is also present|already defined|conflict|manifest merger failed' "$report" | head -n 40 || true)
           done < <(find app/build -type f -iname '*manifest*report*' -print 2>/dev/null)
           {
             grep -iE '(^e:|error|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find|Searched in|Could not GET|Resource missing|No cached version|manifest|conflict|uses-sdk|attribute)' gradle-build.log | tail -n 80 || true

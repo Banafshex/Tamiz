@@ -137,7 +137,7 @@ jobs:
             done < <(grep -iE 'error|merging errors|uses-sdk:|attribute [^ ]+.*(is|has)|is also present|already defined|conflict|manifest merger failed' "$report" | head -n 40 || true)
           done < <(find app/build -type f -iname '*manifest*report*' -print 2>/dev/null)
           {
-            grep -iE '(^e:|error|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find|Searched in|Could not GET|Resource missing|No cached version|manifest|conflict|uses-sdk|attribute)' gradle-build.log | tail -n 80 || true
+            grep -iE '(^e:|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find|No cached version|Searched in|Could not (GET|HEAD)|failed to resolve|Manifest merger failed|uses-sdk:|attribute .* (is|has)|AAPT:|error:)' gradle-build.log | head -n 60 || true
             tail -n 12 gradle-build.log
           } | while IFS= read -r line; do
             escaped="${line//'%'/'%25'}"

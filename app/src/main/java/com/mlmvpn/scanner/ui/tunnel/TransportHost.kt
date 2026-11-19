@@ -22,7 +22,11 @@ import com.mlmvpn.scanner.utils.S
  * back to the caller.
  */
 @Composable
-fun TransportHost(transport: Transport, onExit: () -> Unit) {
+fun TransportHost(
+    transport: Transport,
+    onExit: () -> Unit,
+    onOpenGeneralSettings: () -> Unit = {},
+) {
     val context = LocalContext.current
     val prefs = remember { TunnelPreferences(context) }
     val stack = remember { mutableStateListOf<String>() }
@@ -174,6 +178,7 @@ fun TransportHost(transport: Transport, onExit: () -> Unit) {
         onOpenTorRegion = { push(PAGE_TOR_REGION) },
         onOpenTorMode = { push(PAGE_TOR_MODE) },
         onOpenPage = { push(it) },
+        onOpenGeneralSettings = onOpenGeneralSettings,
         detail = detail,
     )
 }

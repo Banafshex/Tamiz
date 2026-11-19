@@ -63,6 +63,7 @@ jobs:
       - name: Select runner JDK
         run: |
           sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+          sed -i '/^org\.gradle\.java\.installations\.paths=/d' gradle.properties
           sed -i 's/ -Djdk\.net\.unixdomain\.tmpdir=[^ ]*//' gradle.properties
 
       - name: Build release APK

@@ -114,7 +114,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew --no-daemon :app:assembleRelease -PmlmTestSign --stacktrace 2>&1 | tee gradle-build.log
+          ./gradlew --no-daemon :app:assembleRelease -PmlmTestSign --stacktrace --info 2>&1 | tee gradle-build.log
 
       - name: Report build failure details
         if: failure() && hashFiles('gradle-build.log') != ''
@@ -137,7 +137,7 @@ jobs:
             done < <(grep -E 'error:|Error:|Manifest merger failed|uses-sdk|attribute ' "$report" | tail -n 30 || true)
           done < <(find app/build -type f -iname '*manifest*report*' -print 2>/dev/null)
           {
-            grep -E '(^e:|error:|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find|Searched in|Could not GET|Resource missing|No cached version)' gradle-build.log | tail -n 60 || true
+            grep -iE '(^e:|error|^FAILURE:|What went wrong:|Caused by:|Could not resolve|Could not find|Searched in|Could not GET|Resource missing|No cached version|manifest|conflict|uses-sdk|attribute)' gradle-build.log | tail -n 80 || true
             tail -n 12 gradle-build.log
           } | while IFS= read -r line; do
             escaped="${line//'%'/'%25'}"

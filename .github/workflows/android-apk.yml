@@ -66,6 +66,16 @@ jobs:
           sed -i '/^org\.gradle\.java\.installations\.paths=/d' gradle.properties
           sed -i 's/ -Djdk\.net\.unixdomain\.tmpdir=[^ ]*//' gradle.properties
 
+      # This upstream AAR is intentionally not committed to the source repository. Restore the
+      # pinned, license-noted artifact that the existing Windscribe sources compile against.
+      - name: Restore pinned Windscribe compile dependency
+        run: |
+          mkdir -p app/libs
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/Windscribe/Android-App/raw/2c585dd5979ba93655853d56d849ed8ad2c964cb/base/src/main/libs/wsnet.aar" \
+            --output app/libs/wsnet.aar
+          echo "5b0145d526aa10f6b7ec094639bfc8dc2f187d76d1b70915cf4da4802b822f11  app/libs/wsnet.aar" | sha256sum --check --status
+
       - name: Build release APK
         shell: bash
         run: |

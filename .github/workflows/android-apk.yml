@@ -66,6 +66,28 @@ jobs:
           sed -i '/^org\.gradle\.java\.installations\.paths=/d' gradle.properties
           sed -i 's/ -Djdk\.net\.unixdomain\.tmpdir=[^ ]*//' gradle.properties
 
+      # The Psiphon AAR is deliberately not committed. Restore the exact upstream library version
+      # used by this source, verify the release digest, then apply the repository's gomobile
+      # namespace-repackaging script before Gradle sees it.
+      - name: Restore pinned Psiphon tunnel core
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/Psiphon-Android-Library.zip"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases/download/v2.0.39/Psiphon-Android-Library.zip" \
+            --output "$archive"
+          echo "51f07acfd548e468d9edc9fe1818c110cd021508d506bfe3dfb33f5e54dd79b3  $archive" | sha256sum --check --status
+          aar_entry="$(unzip -Z1 "$archive" | grep -E 'aar$' | sed -n '1p')"
+          if [[ -z "$aar_entry" ]]; then
+            echo 'The pinned Psiphon release archive contains no AAR.' >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/psiphon-aar" app/libs
+          unzip -p "$archive" "$aar_entry" > "$RUNNER_TEMP/psiphontunnel-2.0.39.aar"
+          python3 scripts/repackage-psiphon-aar.py "$RUNNER_TEMP/psiphontunnel-2.0.39.aar"
+          mv "$RUNNER_TEMP/psiphontunnel-2.0.39-ns.aar" app/libs/
+
       # This upstream AAR is intentionally not committed to the source repository. Restore the
       # pinned, license-noted artifact that the existing Windscribe sources compile against.
       - name: Restore pinned Windscribe compile dependency

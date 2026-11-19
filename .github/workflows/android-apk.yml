@@ -97,24 +97,16 @@ jobs:
             --output app/libs/wsnet.aar
           echo "5b0145d526aa10f6b7ec094639bfc8dc2f187d76d1b70915cf4da4802b822f11  app/libs/wsnet.aar" | sha256sum --check --status
 
-      # The repository tracks libv2ray's Java API jar for compilation but not its complete AAR.
-      # Build a compile-only AAR around that jar for this Psiphon-first CI package; no Xray native
-      # engine binary is added to the APK.
-      - name: Package compile-time libv2ray API
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/libv2ray-aar" app/libs
-          cp app/classes.jar "$RUNNER_TEMP/libv2ray-aar/classes.jar"
-          cat > "$RUNNER_TEMP/libv2ray-aar/AndroidManifest.xml" <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" />
-          EOF
-          (cd "$RUNNER_TEMP/libv2ray-aar" && zip -q "$GITHUB_WORKSPACE/app/libs/libv2ray-compile-only.aar" AndroidManifest.xml classes.jar)
+      # The repository tracks libv2ray's Java API jar but not its complete AAR. Put only that jar
+      # on CI's compile classpath; do not synthesize an AAR manifest or package Xray's runtime.
+      - name: Verify compile-time libv2ray API
+        run: test -s app/classes.jar
 
       - name: Build release APK
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew --no-daemon :app:assembleRelease -PmlmTestSign --stacktrace --info 2>&1 | tee gradle-build.log
+          ./gradlew --no-daemon :app:assembleRelease -PmlmTestSign -PmlmCiCompileOnlyV2ray --stacktrace --info 2>&1 | tee gradle-build.log
 
       - name: Report build failure details
         if: failure() && hashFiles('gradle-build.log') != ''

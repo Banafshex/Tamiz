@@ -141,7 +141,7 @@ jobs:
             escaped="${escaped//$'\r'/'%0D'}"
             escaped="${escaped//$'\n'/'%0A'}"
             echo "::error title=Gradle failure detail::$escaped"
-          done < <(grep -iE 'what went wrong|execution failed|exception|error:|failed|failure|caused by|manifest merger|requires|duplicate|conflict|could not|unable|not found|cannot|unresolved reference|compilation error' gradle-build.log | head -n 25 || true)
+          done < <(grep -iE '^FAILURE:|What went wrong:|Execution failed for task|^> |Caused by:|Manifest merger failed|uses-sdk:|error:|^e:|Task .*FAILED|failed with an exception|Unable to|No such file|unresolved reference' gradle-build.log | head -n 30 || true)
 
       - name: Upload Gradle diagnostics
         if: failure() && hashFiles('gradle-build.log') != ''

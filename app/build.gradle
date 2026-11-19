@@ -17,6 +17,7 @@ android {
 
     defaultConfig {
         applicationId "com.mlmvpn.scanner"
+        manifestPlaceholders = [applicationId: "com.mlmvpn.scanner"]
         minSdk 24
         targetSdk 34
         versionCode 81

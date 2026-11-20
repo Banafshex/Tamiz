@@ -229,11 +229,11 @@ enum class Transport(
     }
 
     /**
-     * Whether this transport runs on the tunnel core (libtunnelcore). Geph brings its own engine,
-     * so a core that failed to load on this phone is no reason to refuse it.
+     * Whether this transport runs on the Rust tunnel core (libtunnelcore). Psiphon and Geph
+     * bring their own engines, so that unrelated core must not block their connection flows.
      */
     val needsTunnelCore: Boolean
-        get() = this != GEPH && this != CFWG && this != LANTERN && this != URNETWORK
+        get() = this != PSIPHON && this != GEPH && this != CFWG && this != LANTERN && this != URNETWORK
 
     companion object {
         fun byId(id: String): Transport? = entries.firstOrNull { it.id == id }

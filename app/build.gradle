@@ -262,6 +262,12 @@ dependencies {
     implementation 'com.google.zxing:core:3.5.3'
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
 
+    // CI's Psiphon-focused APK keeps Xray's Java API available to compile without packaging its
+    // runtime engine. The complete libv2ray AAR, when supplied locally, still comes from fileTree.
+    if (project.hasProperty('mlmCiCompileOnlyV2ray')) {
+        compileOnly files('classes.jar')
+    }
+
     // Prebuilt cores shipped as .aar: libv2ray (Xray) and psiphontunnel (Psiphon's Go
     // controller). Taken as a tree rather than named one by one so adding a core is a file
     // copy rather than a build edit -- and so neither can be listed twice by accident.

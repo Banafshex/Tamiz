@@ -66,16 +66,19 @@ fun AppScreen() {
             ?.getBooleanExtra(com.mlmvpn.scanner.engines.game.booster.session.GameBoostService.EXTRA_OPEN_BOOSTER, false) == true
     }
 
-    // The landing screen is the icon grid. Everything else in the app is reached from it: the
-    // four dock apps, the fourteen grid apps, and nothing hidden behind a drawer any more.
+    // The app opens straight into Psiphon. Its focused screen keeps the everyday actions in
+    // front; general settings and manual clean-IP setup live in its hamburger menu. The rest of
+    // the existing tools remain in the build for shared engines and external entry points, but
+    // are not part of this focused primary flow.
     val homeTab = "home"
+    val psiphonTab = com.mlmvpn.scanner.ui.tunnel.Transport.PSIPHON.id
     // A `.conf` opened with the app (AmzImportActivity) lands on the «آمنزیا» section.
     val openedForTab = remember {
         generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
             .filterIsInstance<android.app.Activity>().firstOrNull()?.intent
             ?.getStringExtra(com.mlmvpn.scanner.ui.amnezia.AmzImportActivity.EXTRA_OPEN_TAB)
     }
-    var activeTab by remember { mutableStateOf(if (hasPendingBoost || openedFromBooster) "game" else openedForTab ?: homeTab) }
+    var activeTab by remember { mutableStateOf(if (hasPendingBoost || openedFromBooster) "game" else openedForTab ?: psiphonTab) }
     // Real back stack (was a single `previousTab`, which broke nested navigation: opening a screen
     // FROM another overlay clobbered the one shared "previous" value, so the parent's back button
     // went dead). openTab() pushes; goBack() pops; switchTab() resets the stack.
@@ -176,6 +179,7 @@ fun AppScreen() {
             // landing screen was something else, so back on the landing screen walked SIDEWAYS
             // into Cloud instead of offering to exit, and the exit prompt was unreachable from
             // the one screen that is supposed to own it.
+            activeTab == psiphonTab && navStack.isEmpty() -> showExitDialog = true
             activeTab != homeTab -> switchTab(homeTab)
             else -> showExitDialog = true
         }
@@ -378,6 +382,10 @@ fun AppScreen() {
                                     com.mlmvpn.scanner.ui.tunnel.TransportHost(
                                         transport = transport,
                                         onExit = { goBack() },
+                                        onOpenGeneralSettings = {
+                                            settingsRoute = null
+                                            openTab("settings")
+                                        },
                                     )
                                 }
                             }

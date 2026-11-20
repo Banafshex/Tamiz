@@ -1,0 +1,187 @@
+name: Android APK
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build signed universal APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # GitHub-hosted Ubuntu images include the Android SDK. Use that installation directly rather
+      # than downloading a second SDK in an action, then ensure this project's compile packages exist.
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [[ ! -d "$sdk_root" ]]; then
+            echo "Android SDK directory not found: $sdk_root" >&2
+            exit 1
+          fi
+          sdkmanager="$(find "$sdk_root/cmdline-tools" -type f -path '*/bin/sdkmanager' -print 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "$sdkmanager" ]]; then
+            echo "sdkmanager not found under $sdk_root/cmdline-tools" >&2
+            exit 1
+          fi
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          echo "$sdk_root/platform-tools" >> "$GITHUB_PATH"
+          yes | "$sdkmanager" --licenses >/dev/null || true
+          "$sdkmanager" "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v5
+
+      # gradle.properties in this Windows-oriented checkout pins org.gradle.java.home to an
+      # Android Studio path that does not exist on GitHub's Linux runner. Use setup-java's JDK.
+      - name: Select runner JDK
+        run: |
+          sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+          sed -i '/^org\.gradle\.java\.installations\.paths=/d' gradle.properties
+          sed -i 's/ -Djdk\.net\.unixdomain\.tmpdir=[^ ]*//' gradle.properties
+
+      # The Psiphon AAR is deliberately not committed. Restore the exact upstream library version
+      # used by this source, verify the release digest, then apply the repository's gomobile
+      # namespace-repackaging script before Gradle sees it.
+      - name: Restore pinned Psiphon tunnel core
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/Psiphon-Android-Library.zip"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases/download/v2.0.39/Psiphon-Android-Library.zip" \
+            --output "$archive"
+          echo "51f07acfd548e468d9edc9fe1818c110cd021508d506bfe3dfb33f5e54dd79b3  $archive" | sha256sum --check --status
+          aar_entry="$(unzip -Z1 "$archive" | grep -E 'aar$' | sed -n '1p')"
+          if [[ -z "$aar_entry" ]]; then
+            echo 'The pinned Psiphon release archive contains no AAR.' >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/psiphon-aar" app/libs
+          unzip -p "$archive" "$aar_entry" > "$RUNNER_TEMP/psiphontunnel-2.0.39.aar"
+          python3 scripts/repackage-psiphon-aar.py "$RUNNER_TEMP/psiphontunnel-2.0.39.aar"
+          mv "$RUNNER_TEMP/psiphontunnel-2.0.39-ns.aar" app/libs/
+
+      # This upstream AAR is intentionally not committed to the source repository. Restore the
+      # pinned, license-noted artifact that the existing Windscribe sources compile against.
+      - name: Restore pinned Windscribe compile dependency
+        run: |
+          mkdir -p app/libs
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/Windscribe/Android-App/raw/2c585dd5979ba93655853d56d849ed8ad2c964cb/base/src/main/libs/wsnet.aar" \
+            --output app/libs/wsnet.aar
+          echo "5b0145d526aa10f6b7ec094639bfc8dc2f187d76d1b70915cf4da4802b822f11  app/libs/wsnet.aar" | sha256sum --check --status
+
+      # The repository tracks libv2ray's Java API jar but not its complete AAR. Put only that jar
+      # on CI's compile classpath; do not synthesize an AAR manifest or package Xray's runtime.
+      - name: Verify compile-time libv2ray API
+        run: test -s app/classes.jar
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PmlmTestSign -PmlmCiCompileOnlyV2ray --stacktrace --info 2>&1 | tee gradle-build.log
+
+      - name: Report build failure details
+        if: failure() && hashFiles('gradle-build.log') != ''
+        shell: bash
+        run: |
+          echo '## Gradle build failure (last 100 lines)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 100 gradle-build.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r report; do
+            echo "## Manifest merger report: $report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            while IFS= read -r line; do
+              escaped="${line//'%'/'%25'}"
+              escaped="${escaped//$'\r'/'%0D'}"
+              escaped="${escaped//$'\n'/'%0A'}"
+              echo "::error title=Manifest merger detail::$escaped"
+            done < <(grep -iE 'error|merging errors|uses-sdk:|attribute [^ ]+.*(is|has)|is also present|already defined|conflict|manifest merger failed' "$report" | head -n 40 || true)
+          done < <(find app/build -type f -iname '*manifest*report*' -print 2>/dev/null)
+          while IFS= read -r line; do
+            escaped="${line//'%'/'%25'}"
+            escaped="${escaped//$'\r'/'%0D'}"
+            escaped="${escaped//$'\n'/'%0A'}"
+            echo "::error title=Gradle failure detail::$escaped"
+          done < <(grep -iE 'FAILURE:|What went wrong:|Execution failed for task|Caused by:|Manifest merger failed|uses-sdk:|error:|^e:|FAILED$|failed with an exception|No such file|unresolved reference|AAPT:|passed, [0-9]+ failed' gradle-build.log | head -n 30 || true)
+
+      - name: Upload Gradle diagnostics
+        if: failure() && hashFiles('gradle-build.log') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-diagnostics
+          path: |
+            gradle-build.log
+            app/build/outputs/logs/**
+            app/build/intermediates/merged_manifest/**
+            app/build/outputs/apk/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Collect universal APK
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk -type f -name '*universal*release.apk' -print -quit)"
+          if [[ -z "$apk" ]]; then
+            echo 'Universal release APK was not produced.' >&2
+            find app/build/outputs/apk -type f -print >&2 || true
+            exit 1
+          fi
+          mkdir -p artifacts
+          cp "$apk" artifacts/psiphon-focused-universal.apk
+          echo "path=artifacts/psiphon-focused-universal.apk" >> "$GITHUB_OUTPUT"
+          sha256sum artifacts/psiphon-focused-universal.apk | tee artifacts/SHA256SUMS.txt
+
+      - name: Upload APK artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: psiphon-focused-universal-apk
+          path: |
+            artifacts/psiphon-focused-universal.apk
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Add download link to run summary
+        run: |
+          echo '## Android APK' >> "$GITHUB_STEP_SUMMARY"
+          echo '[Download the signed universal APK artifact](${{ steps.upload.outputs.artifact-url }})' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This build uses the debug signing key and is for testing; it is not a Play Store release.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'SHA-256:' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat artifacts/SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

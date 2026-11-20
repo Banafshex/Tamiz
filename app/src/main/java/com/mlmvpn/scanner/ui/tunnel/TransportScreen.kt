@@ -32,22 +32,32 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.withContext
 import com.mlmvpn.core.tunnel.ConnectionLog
 import com.mlmvpn.core.tunnel.IpFormatter
 import com.mlmvpn.core.tunnel.TunnelPreferences
@@ -92,6 +103,7 @@ import com.mlmvpn.scanner.ui.settings.SettingsRow
 import com.mlmvpn.scanner.ui.settings.SettingsSectionHeader
 import com.mlmvpn.scanner.ui.theme.CardShape
 import com.mlmvpn.scanner.ui.theme.PanelShape
+import com.mlmvpn.scanner.store.tr
 import com.mlmvpn.scanner.R
 import com.mlmvpn.scanner.utils.S
 
@@ -119,6 +131,8 @@ fun TransportScreen(
     onOpenTorMode: () -> Unit,
     /** A transport's own page by name -- «گف»'s account, exit, news and sessions pages. */
     onOpenPage: (String) -> Unit = {},
+    /** Open the app-wide settings page from Psiphon's focused menu. */
+    onOpenGeneralSettings: () -> Unit = onOpenAdvanced,
     /**
      * A page to show INSTEAD of the settings rows, in two-pane mode only.
      *
@@ -221,6 +235,9 @@ fun TransportScreen(
         }
     }
 
+    val focusedPsiphon = transport == Transport.PSIPHON
+    var psiphonMenuExpanded by remember { mutableStateOf(false) }
+
     // 720dp, the same threshold Settings uses, and for the same reason: it is the width at which
     // two real columns fit rather than two cramped ones. A phone in landscape is not it.
     val twoPane = LocalConfiguration.current.screenWidthDp >= 720
@@ -232,23 +249,25 @@ fun TransportScreen(
 
         Spacer(Modifier.height(18.dp))
 
-        Text(
-            transport.label,
-            color = Ios.SecondaryLabel,
-            fontSize = 13.sp,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            transport.taglineFa,
-            color = Ios.SecondaryLabel,
-            fontSize = 13.sp,
-            lineHeight = 20.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 34.dp),
-        )
+        if (!focusedPsiphon) {
+            Text(
+                transport.label,
+                color = Ios.SecondaryLabel,
+                fontSize = 13.sp,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                transport.taglineFa,
+                color = Ios.SecondaryLabel,
+                fontSize = 13.sp,
+                lineHeight = 20.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 34.dp),
+            )
+        }
 
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(if (focusedPsiphon) 12.dp else 26.dp))
 
         ConnectDial(
             transport = transport,
@@ -451,9 +470,38 @@ fun TransportScreen(
         Spacer(Modifier.height(28.dp))
     }
 
+    val focusedControls: @Composable ColumnScope.() -> Unit = {
+        PsiphonFocusedControls(preferences = prefs)
+        Spacer(Modifier.height(24.dp))
+    }
+
     IosScreen(
         title = transport.labelFa,
-        onBack = onBack,
+        onBack = if (focusedPsiphon) null else onBack,
+        trailing = if (focusedPsiphon) {
+            {
+                Box {
+                    IconButton(onClick = { psiphonMenuExpanded = true }) {
+                        Icon(Icons.Default.Menu, contentDescription = tr("منو", "Menu"), tint = Ios.Label)
+                    }
+                    DropdownMenu(
+                        expanded = psiphonMenuExpanded,
+                        onDismissRequest = { psiphonMenuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(tr("تنظیمات کلی", "General settings")) },
+                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            onClick = { psiphonMenuExpanded = false; onOpenGeneralSettings() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(tr("تنظیم دستی آی‌پی تمیز", "Manual clean-IP settings")) },
+                            leadingIcon = { Icon(Icons.Default.CleaningServices, contentDescription = null) },
+                            onClick = { psiphonMenuExpanded = false; onOpenPage(PsiphonPages.CLEAN) },
+                        )
+                    }
+                }
+            }
+        } else null,
         backLabel = S(R.string.home),
         // Off in two panes, because each column scrolls on its own below. One scroll around both
         // would move the connect control off screen to reach a settings row, which is the exact
@@ -462,7 +510,7 @@ fun TransportScreen(
     ) {
         if (!twoPane) {
             hero()
-            options()
+            if (focusedPsiphon) focusedControls() else options()
             return@IosScreen
         }
 
@@ -492,7 +540,7 @@ fun TransportScreen(
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState()),
                     ) {
-                        options()
+                        if (focusedPsiphon) focusedControls() else options()
                     }
                 }
             }
@@ -560,6 +608,121 @@ private fun Footer(text: String) {
         fontSize = 13.sp,
         lineHeight = 21.sp,
         modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 8.dp),
+    )
+}
+
+@Composable
+private fun PsiphonFocusedControls(preferences: TunnelPreferences) {
+    val context = LocalContext.current
+    val cleanState by com.mlmvpn.core.tunnel.PsiphonCleanIps.state.collectAsState()
+    val codes = remember { com.mlmvpn.core.tunnel.PsiphonRegions.options(context) }
+    var countryExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.mlmvpn.core.tunnel.PsiphonCleanIps.init(context)
+        }
+    }
+
+    val job = cleanState.job
+    val usable = remember(cleanState.list) {
+        cleanState.list.count { entry ->
+            entry.confirmedAt > 0L || entry.real?.let { real -> real.ok && real.ms != null && real.pingMs != null } == true
+        }
+    }
+    SettingsSectionHeader(tr("دریافت آی‌پی تمیز", "Clean IP settings"))
+    SettingsGroup {
+        SettingsActionRow(
+            label = if (job.running) tr("توقف دریافت تنظیمات", "Stop automatic setup")
+                else tr("دریافت تنظیمات خودکار", "Get settings automatically"),
+            icon = if (job.running) Icons.Default.Power else Icons.Default.Search,
+            tint = if (job.running) Ios.Red else Ios.Blue,
+            onClick = {
+                if (job.running) {
+                    com.mlmvpn.core.tunnel.PsiphonCleanIps.cancel()
+                } else {
+                    com.mlmvpn.core.tunnel.PsiphonCleanIps.scan(
+                        context,
+                        com.mlmvpn.core.tunnel.PsiphonCleanIps.ScanOptions(
+                            realTop = 20,
+                            realSuccessTarget = 20,
+                        ),
+                    )
+                }
+            },
+        )
+        if (job.running) {
+            val progress = when {
+                job.stage == "tls" && job.total > 0 -> (job.done.toFloat() / job.total).coerceIn(0f, 1f)
+                job.stage == "real" && job.realTotal > 0 -> (job.real.toFloat() / job.realTotal).coerceIn(0f, 1f)
+                else -> null
+            }
+            if (progress == null) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = Ios.Blue,
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = progress,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = Ios.Blue,
+                )
+            }
+        }
+    }
+    Text(
+        text = when {
+            job.running && job.stage == "real" -> tr(
+                "سنجش واقعی و پینگ: ${fa("${job.realOk}/20")} آی‌پی تأیید شد؛ ${fa("${job.real}")} از ${fa("${job.realTotal}")} پاسخ‌گو آزموده شد…",
+                "Real tunnel and ping test: ${job.realOk}/20 IPs verified; tested ${job.real} of ${job.realTotal} responsive candidates…",
+            )
+            job.running -> tr("در حال پیدا کردن و آزمودن آی‌پی‌های تمیز برای سایفون…", "Finding and testing clean IPs for Psiphon…")
+            job.error.isNotBlank() -> tr("خطا: ${job.error}", "Error: ${job.error}")
+            job.note.isNotBlank() -> job.note
+            usable > 0 -> tr("${usable} آی‌پی با تونل واقعی و پینگ تأیید شده؛ سایفون آن‌ها را در اتصال خودکار می‌آزماید.", "$usable IPs passed a real tunnel and ping test; Psiphon can try them automatically when connecting.")
+            else -> tr("آی‌پی‌ها در اینترنت همین گوشی پیدا و آزموده می‌شوند؛ تا وقتی آی‌پی آماده شود، سایفون با روش‌های دیگرش وصل می‌شود.", "IPs are found and tested on this phone's network. Psiphon keeps its other connection methods available while they are being found.")
+        },
+        color = Ios.SecondaryLabel,
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+    )
+
+    SettingsSectionHeader(tr("کشور خروج", "Exit country"))
+    Box(Modifier.fillMaxWidth()) {
+        SettingsGroup {
+            SettingsRow(
+                title = tr("انتخاب کشور", "Choose a country"),
+                icon = Icons.Default.Language,
+                tint = Ios.Indigo,
+                value = if (preferences.egressRegion.isBlank() || preferences.egressRegion == "auto") tr("خودکار", "Automatic")
+                    else CountryLabel.withFlag(preferences.egressRegion),
+                onClick = { countryExpanded = true },
+            )
+        }
+        DropdownMenu(
+            expanded = countryExpanded,
+            onDismissRequest = { countryExpanded = false },
+            modifier = Modifier.heightIn(max = 420.dp),
+        ) {
+            DropdownMenuItem(
+                text = { Text(tr("خودکار", "Automatic")) },
+                onClick = { preferences.egressRegion = "auto"; countryExpanded = false },
+            )
+            codes.forEach { code ->
+                DropdownMenuItem(
+                    text = { Text(CountryLabel.withFlag(code)) },
+                    onClick = { preferences.egressRegion = code; countryExpanded = false },
+                )
+            }
+        }
+    }
+    Text(
+        tr("کشور، ترجیح اتصال است و ممکن است با توجه به سرورهای در دسترس تغییر کند.", "The country is a preference; Psiphon may use another one if its servers are unavailable."),
+        color = Ios.SecondaryLabel,
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
     )
 }
 

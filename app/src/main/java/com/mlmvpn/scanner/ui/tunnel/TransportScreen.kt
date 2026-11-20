@@ -625,7 +625,9 @@ private fun PsiphonFocusedControls(preferences: TunnelPreferences) {
 
     val job = cleanState.job
     val usable = remember(cleanState.list) {
-        cleanState.list.count { it.real?.ok == true || it.confirmedAt > 0L || (it.real == null && it.ok) }
+        cleanState.list.count { entry ->
+            entry.confirmedAt > 0L || entry.real?.let { real -> real.ok && real.ms != null && real.pingMs != null } == true
+        }
     }
     SettingsSectionHeader(tr("دریافت آی‌پی تمیز", "Clean IP settings"))
     SettingsGroup {
@@ -640,25 +642,44 @@ private fun PsiphonFocusedControls(preferences: TunnelPreferences) {
                 } else {
                     com.mlmvpn.core.tunnel.PsiphonCleanIps.scan(
                         context,
-                        com.mlmvpn.core.tunnel.PsiphonCleanIps.ScanOptions(),
+                        com.mlmvpn.core.tunnel.PsiphonCleanIps.ScanOptions(
+                            realTop = 20,
+                            realSuccessTarget = 20,
+                        ),
                     )
                 }
             },
         )
         if (job.running) {
-            LinearProgressIndicator(
-                progress = if (job.total > 0) (job.done.toFloat() / job.total).coerceIn(0f, 1f) else 0f,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                color = Ios.Blue,
-            )
+            val progress = when {
+                job.stage == "tls" && job.total > 0 -> (job.done.toFloat() / job.total).coerceIn(0f, 1f)
+                job.stage == "real" && job.realTotal > 0 -> (job.real.toFloat() / job.realTotal).coerceIn(0f, 1f)
+                else -> null
+            }
+            if (progress == null) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = Ios.Blue,
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = progress,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = Ios.Blue,
+                )
+            }
         }
     }
     Text(
         text = when {
+            job.running && job.stage == "real" -> tr(
+                "سنجش واقعی و پینگ: ${fa("${job.realOk}/20")} آی‌پی تأیید شد؛ ${fa("${job.real}")} از ${fa("${job.realTotal}")} پاسخ‌گو آزموده شد…",
+                "Real tunnel and ping test: ${job.realOk}/20 IPs verified; tested ${job.real} of ${job.realTotal} responsive candidates…",
+            )
             job.running -> tr("در حال پیدا کردن و آزمودن آی‌پی‌های تمیز برای سایفون…", "Finding and testing clean IPs for Psiphon…")
             job.error.isNotBlank() -> tr("خطا: ${job.error}", "Error: ${job.error}")
             job.note.isNotBlank() -> job.note
-            usable > 0 -> tr("${usable} آی‌پی آزموده‌شده آماده است؛ سایفون هنگام اتصال خودکار از آن‌ها استفاده می‌کند.", "$usable tested IPs ready; Psiphon will use them automatically when connecting.")
+            usable > 0 -> tr("${usable} آی‌پی با تونل واقعی و پینگ تأیید شده؛ سایفون آن‌ها را در اتصال خودکار می‌آزماید.", "$usable IPs passed a real tunnel and ping test; Psiphon can try them automatically when connecting.")
             else -> tr("آی‌پی‌ها در اینترنت همین گوشی پیدا و آزموده می‌شوند؛ تا وقتی آی‌پی آماده شود، سایفون با روش‌های دیگرش وصل می‌شود.", "IPs are found and tested on this phone's network. Psiphon keeps its other connection methods available while they are being found.")
         },
         color = Ios.SecondaryLabel,

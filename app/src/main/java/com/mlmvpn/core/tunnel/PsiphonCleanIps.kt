@@ -282,6 +282,16 @@ object PsiphonCleanIps {
             .thenBy { it.tlsMs ?: Long.MAX_VALUE },
     )
 
+    /** This scan's real successes that measured both connection delay and a data ping. */
+    private fun freshVerifiedIps(ips: Set<String>): List<Entry> =
+        _state.value.list.asSequence()
+            .filter { entry ->
+                val real = entry.real
+                entry.ip in ips && real != null && real.ok && real.ms != null && real.pingMs != null
+            }
+            .sortedWith(compareBy<Entry> { it.real?.pingMs ?: Long.MAX_VALUE }.thenBy { it.real?.ms ?: Long.MAX_VALUE })
+            .toList()
+
     data class AddResult(val added: Int, val bad: List<String>)
 
     /** The user's own addresses: IPs (v4/v6) and small IPv4 CIDRs (/22 to /32), one per line or space. */
@@ -667,7 +677,12 @@ object PsiphonCleanIps {
         val families: List<String> = listOf("v6", "v4"),
         val sources: List<String> = listOf("names"),
         val maxIps: Int = 1500,
+        /** Addresses tested per batch; manual scans test only this many. */
         val realTop: Int = 6,
+        /** Automatic setup keeps testing candidates until this many real, ping-tested addresses pass. */
+        val realSuccessTarget: Int = 0,
+        /** Maximum real-test candidates for bounded automatic scans; zero means all TLS answers. */
+        val realCandidateLimit: Int = 0,
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -764,6 +779,12 @@ object PsiphonCleanIps {
             val ticker = launch { tick(my, c, app) }
             try {
                 init(app)
+                // A previous scan may already have found TLS-valid edges but not had time to test
+                // them through a real Psiphon tunnel. Automatic setup must resume those candidates,
+                // rather than excluding every saved IP as "already seen" on the next tap.
+                val reusable = if (o.realSuccessTarget > 0) {
+                    sorted(_state.value.list.filter { it.ok && it.real == null })
+                } else emptyList()
                 val seen = _state.value.list.mapTo(HashSet()) { it.ip }
                 val cand = ArrayList<Pair<String, String>>()
                 for (key in o.providers.filter { it in PROVIDERS }) {
@@ -783,7 +804,7 @@ object PsiphonCleanIps {
                 if (!mine(my)) return@launch
                 val list = cand.take(o.maxIps)
                 job(my) { it.copy(stage = "tls", total = list.size, done = 0, ok = 0,
-                    note = if (list.isEmpty()) tr("نامی حل نشد — اینترنت یا DNS این گوشی را بررسی کنید، یا «رنج‌ها» را هم انتخاب کنید.",
+                    note = if (list.isEmpty() && reusable.isEmpty()) tr("نامی حل نشد — اینترنت یا DNS این گوشی را بررسی کنید، یا «رنج‌ها» را هم انتخاب کنید.",
                         "No name resolved -- check this phone's internet or DNS, or choose «ranges» too.") else "") }
                 val found = ConcurrentLinkedQueue<Triple<String, String, Long>>()
                 val next = AtomicInteger()
@@ -816,11 +837,51 @@ object PsiphonCleanIps {
                     val keep = sorted(l).take(MAX_KEEP)
                     l.clear(); l.addAll(keep)
                 }
-                if (o.realTop > 0 && mine(my) && found.isNotEmpty()) {
-                    // The fastest of each family: on a line like the desktop's, IPv4 edges answer TLS and carry nothing.
-                    val fresh = sorted(_state.value.list.filter { e -> found.any { it.first == e.ip } })
-                    val pick = fresh.filter { it.v6 }.take((o.realTop + 1) / 2) + fresh.filter { !it.v6 }.take(o.realTop / 2)
-                    realTestNow(app, my, c, pick.map { it.ip }, fastMode(app))
+                if (o.realTop > 0 && mine(my) && (found.isNotEmpty() || reusable.isNotEmpty())) {
+                    val candidateIps = if (o.realSuccessTarget > 0) {
+                        (reusable.map { it.ip } + found.map { it.first }).toSet()
+                    } else found.mapTo(HashSet()) { it.first }
+                    val fresh = sorted(_state.value.list.filter { it.ip in candidateIps && it.real == null })
+                    if (o.realSuccessTarget > 0) {
+                        // Automatic setup needs verified results, not just TLS responders. Prefer IPv6
+                        // (the measured line often has IPv4 edges that answer TLS but carry no data),
+                        // and continue in bounded batches until we have enough real tunnels + pings.
+                        val limit = o.realCandidateLimit.takeIf { it > 0 } ?: fresh.size
+                        val candidates = fresh.sortedWith(
+                            compareBy<Entry> { if (it.v6) 0 else 1 }
+                                .thenBy { it.tlsMs ?: Long.MAX_VALUE },
+                        ).take(limit)
+                        val tested = HashSet<String>()
+                        for (batch in candidates.chunked(o.realTop.coerceIn(1, 40))) {
+                            if (!mine(my)) break
+                            val alreadyVerified = freshVerifiedIps(candidateIps)
+                            if (alreadyVerified.size >= o.realSuccessTarget) break
+                            realTestNow(app, my, c, batch.map { it.ip }, fastMode(app), accumulate = tested.isNotEmpty())
+                            tested += batch.map { it.ip }
+                        }
+                        if (mine(my)) {
+                            val verified = freshVerifiedIps(candidateIps).take(o.realSuccessTarget)
+                            if (verified.isNotEmpty()) {
+                                val ips = verified.mapTo(HashSet()) { it.ip }
+                                edit(app) { entries ->
+                                    entries.replaceAll { if (it.ip in ips) it.copy(source = "user") else it }
+                                }
+                            }
+                            val note = if (verified.size >= o.realSuccessTarget) {
+                                tr("${fa(verified.size)} آی‌پی با سنجش واقعی و پینگ تأیید و به فهرست خودتان اضافه شد.",
+                                    "${verified.size} IPs passed the real tunnel and ping test and were added to Your own IPs.")
+                            } else {
+                                tr("${fa(verified.size)} آی‌پی با سنجش واقعی و پینگ تأیید و اضافه شد؛ از ${fa(o.realSuccessTarget)} مورد هدف، بیشتر پیدا نشد.",
+                                    "${verified.size} IPs passed the real tunnel and ping test and were added; no more of the ${o.realSuccessTarget} target were found.")
+                            }
+                            job(my) { it.copy(note = note) }
+                        }
+                    } else {
+                        // The configurable scan page keeps its explicit, family-balanced sample.
+                        val pick = fresh.filter { it.v6 }.take((o.realTop + 1) / 2) +
+                            fresh.filter { !it.v6 }.take(o.realTop / 2)
+                        realTestNow(app, my, c, pick.map { it.ip }, fastMode(app))
+                    }
                 }
                 Log.i(TAG, "scan: ${list.size} candidates, ${found.size} answered TLS, real ${_state.value.job.realOk}/${_state.value.job.real}")
             } catch (e: CancellationException) {
@@ -909,12 +970,33 @@ object PsiphonCleanIps {
         }
     }
 
-    private suspend fun realTestNow(app: Context, my: Int, c: Counters, ips: List<String>, fast: Boolean) = coroutineScope {
+    private suspend fun realTestNow(
+        app: Context,
+        my: Int,
+        c: Counters,
+        ips: List<String>,
+        fast: Boolean,
+        accumulate: Boolean = false,
+    ) = coroutineScope {
         val width = PsiphonProbes.width(app)
-        c.queued.set(0)
-        job(my) { it.copy(stage = "real", fast = fast, ips = ips.size, edgeDone = 0, edgeOk = 0, edgeSilent = 0, real = 0, realOk = 0,
-            realTotal = 0, broken = 0, slots = width, budgetMs = PsiphonProbes.CLEAN_MS, current = emptyMap(), recent = emptyList(), realMs = 0L) }
-        listOf(c.edgeDone, c.edgeOk, c.edgeSilent).forEach { it.set(0) }
+        val previous = _state.value.job
+        c.queued.set(if (accumulate) previous.realTotal else 0)
+        c.edgeDone.set(if (accumulate) previous.edgeDone else 0)
+        c.edgeOk.set(if (accumulate) previous.edgeOk else 0)
+        c.edgeSilent.set(if (accumulate) previous.edgeSilent else 0)
+        job(my) { j -> j.copy(
+            stage = "real", fast = fast, ips = (if (accumulate) j.ips else 0) + ips.size,
+            edgeDone = if (accumulate) j.edgeDone else 0,
+            edgeOk = if (accumulate) j.edgeOk else 0,
+            edgeSilent = if (accumulate) j.edgeSilent else 0,
+            real = if (accumulate) j.real else 0,
+            realOk = if (accumulate) j.realOk else 0,
+            realTotal = if (accumulate) j.realTotal else 0,
+            broken = if (accumulate) j.broken else 0,
+            slots = width, budgetMs = PsiphonProbes.CLEAN_MS, current = emptyMap(),
+            recent = if (accumulate) j.recent else emptyList(),
+            realMs = if (accumulate) j.realMs else 0L,
+        ) }
         val work = Work()
         if (fast) {
             launch {
@@ -953,7 +1035,7 @@ object PsiphonCleanIps {
             }
         } else {
             ips.forEachIndexed { i, ip -> work.add(ip, i.toLong()) }
-            c.queued.set(ips.size)
+            c.queued.set((if (accumulate) previous.realTotal else 0) + ips.size)
             work.close()
         }
         repeat(minOf(width, ips.size)) {
